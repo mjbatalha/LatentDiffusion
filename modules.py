@@ -6,37 +6,31 @@ from torch.nn import functional as F
 
 def norm(n_channels: int) -> nn.GroupNorm:
     """
-    Group Normalization (paper: https://doi.org/10.48550/arXiv.1803.08494).
-    
-    The number of channels is divided by 32 and the result is used as the number of groups.
-    The number of channels must be divisible by 32.
-    
-    Parameters
-    ----------
-    n_channels : int
-        The number of channels in the input data.
-    
-    Returns
-    -------
-    nn.GroupNorm
-        The GroupNorm module.
+    Returns a GroupNorm normalization layer with 32 groups.
+
+    (see: https://doi.org/10.48550/arXiv.1803.08494)
+
+    :param n_channels: The number of channels in the input tensor.
+    :return: A GroupNorm normalization layer.
     """
+    
     return nn.GroupNorm(32, n_channels, eps=1e-6)
 
 
 class UpSample(nn.Module):
+    """
+    Up-sampling module (x2) using nearest neighbor interpolation and a
+    convolutional layer.
+    """
     def __init__(self, n_channels: int):
         """
-        Module to upsample the input tensor by a factor of 2.
-
-        Parameters
-        ----------
-        n_channels : int
-            The number of channels in the input tensor.
+        :param n_channels: : The number of channels in the input tensor.
         """
         super().__init__()
 
-        self.conv = nn.Conv2d(n_channels, n_channels, 3, stride=1, padding=1)
+        self.conv = nn.Conv2d(
+            n_channels, n_channels, 3, stride=1, padding=1
+        )
 
     def forward(self, x: torch.Tensor):
 
@@ -47,19 +41,20 @@ class UpSample(nn.Module):
     
 
 class DownSample(nn.Module):
+    """
+    Down-sampling module (x2) using a convolutional layer.
+    
+    The output of the convolutional layer is down-sampled by a factor of 2.
+    The input is padded with zeros on the right and bottom borders.
+    """
     def __init__(self, n_channels: int):
         """
-        Module to downsample the input tensor by a factor of 2.
-
-        Parameters
-        ----------
-        n_channels : int
-            The number of channels in the input tensor.
+        :param n_channels: The number of channels in the input tensor.
         """
         super().__init__()
 
         self.conv = nn.Conv2d(n_channels, n_channels, 3, stride=2, padding=0)
-
+        
     def forward(self, x: torch.Tensor):
 
         x  = F.pad(x, (0, 1, 0, 1), mode="constant", value=0)
@@ -69,23 +64,19 @@ class DownSample(nn.Module):
     
 
 class ResBlock(nn.Module):
-
+    """
+    Residual block with two convolutional layers and a shortcut connection.
+    
+    The input is processed by two convolutional layers with a SiLU activation
+    function in between. The output of the second convolutional layer is added
+    to the input (after a convolutional layer to match the number of channels)
+    to produce the output of the block.
+    """
     def __init__(self, in_channels: int, out_channels: int = None):
         """
-        A residual block module.
-
-        A residual block is a sequence of two convolutional layers with
-        normalization and activation functions. The input is added to the
-        output of the second layer, which allows the network to learn
-        residual functions.
-
-        Parameters
-        ----------
-        in_channels : int
-            The number of channels in the input tensor.
-        out_channels : int, optional
-            The number of channels in the output tensor. If not specified,
-            the number of channels is the same as the input tensor.
+        :param in_channels: The number of channels in the input tensor.
+        :param out_channels: The number of channels in the output tensor.
+            If None, the number of channels is the same as the input tensor.
         """
         super().__init__()
         
@@ -103,7 +94,6 @@ class ResBlock(nn.Module):
             nn.SiLU(),
             nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1),
         )
-
         if in_channels == out_channels:
             self.skip_connection = nn.Identity()
         else:
@@ -118,19 +108,21 @@ class ResBlock(nn.Module):
 
 
 class AttnBlock(nn.Module):
+    """
+    Attention block with self-attention mechanism.
     
+    The input is first normalized using GroupNorm. Then it is split into three
+    parts: queries, keys and values. The queries and keys are used to compute
+    the attention weights. The attention weights are then used to compute the
+    output of the block by taking the dot product of the attention weights and
+    the values.
+
+    (see: Attention is all you need, https://doi.org/10.48550/arXiv.1706.03762)
+
+    """
     def __init__(self, n_channels: int):
         """
-        Initialize the Attention Block module.
-
-        The Attention Block is a module that implements the attention
-        mechanism described in the paper "Attention is All You Need"
-        (https://doi.org/10.48550/arXiv.1706.03762).
-
-        Parameters
-        ----------
-        n_channels : int
-            The number of channels in the input tensor.
+        :param n_channels: The number of channels in the input tensor.
         """
         super().__init__()
 
