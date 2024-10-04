@@ -10,9 +10,6 @@ from modules import ResBlock, AttnBlock, UpSample, DownSample, norm
 class GaussianDistribution:
     """
     Represents a multivariate normal distribution with diagonal covariance matrix.
-
-    :param parameters: A tensor of shape (batch_size, 2 * z_channels, h, w) containing the mean and
-        log-variance of the distribution.
     """
     def __init__(self, parameters: torch.Tensor):
         """
@@ -22,12 +19,12 @@ class GaussianDistribution:
         self.mean, logvar = parameters.chunk(2, dim=1)
         self.logvar = torch.clamp(logvar, -30, 20)
         self.std = torch.exp(0.5 * self.logvar)
+
     def sample(self):
         return self.mean + torch.randn_like(self.mean) * self.std
     
 
 class AutoEncoder(nn.Module):
-
     """
     The AutoEncoder class combines an encoder and a decoder with a moment-estimating
     convolutional layer and a decoding convolutional layer.
@@ -63,7 +60,6 @@ class AutoEncoder(nn.Module):
     
 
 class Encoder(nn.Module):
-
     """
     The Encoder class represents a neural network that takes input data and encodes it
     into a latent space.
