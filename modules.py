@@ -1,7 +1,9 @@
 import torch
 
+from flash_attn import flash_attn_qkvpacked_func
 from torch import nn
 from torch.nn import functional as F
+from typing import Optional
 
 
 def norm(n_channels: int) -> nn.GroupNorm:
@@ -54,7 +56,7 @@ class DownSample(nn.Module):
         super().__init__()
 
         self.conv = nn.Conv2d(n_channels, n_channels, 3, stride=2, padding=0)
-        
+
     def forward(self, x: torch.Tensor):
 
         x  = F.pad(x, (0, 1, 0, 1), mode="constant", value=0)
@@ -152,3 +154,143 @@ class AttnBlock(nn.Module):
         attn = attn.view(b, c, h, w)
 
         return self.o(attn) + x
+    
+
+class CrossAttnBlock(nn.Module):
+    """
+    Cross-Attention block with self-attention mechanism.
+
+    (see: Attention is all you need, https://doi.org/10.48550/arXiv.1706.03762)
+
+    Setup flash attention: https://github.com/HazyResearch/flash-attention.
+
+    """
+    def __init__(self, model_dim: int, cond_dim: int, head_dim: int, n_heads: int):
+        """
+        :param model_dim: The model dimensionality.
+        :param cond_dim: The conditioning dimensionality.
+        :param head_dim: The attention head dimensionality.
+        :param n_heads: The number of attention heads.
+        """
+        super().__init__()
+
+        self.head_dim = head_dim
+        self.n_heads = n_heads
+
+        self.w_q = nn.Linear(model_dim, head_dim * n_heads, bias=False)
+        self.w_k = nn.Linear(cond_dim, head_dim * n_heads, bias=False)
+        self.w_v = nn.Linear(cond_dim, head_dim * n_heads, bias=False)
+
+        self.w_o = nn.Linear(head_dim * n_heads, model_dim, bias=False)
+
+    def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None):
+
+        if cond is None:
+            cond = x
+
+        q = self.w_q(x)
+        k = self.w_k(cond)
+        v = self.w_v(cond)
+
+        return self.attention(q, k, v)
+    def attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+
+        b, l, _ = q.shape
+        qkv = torch.stack((q, k, v), dim=2)
+        qkv = qkv.view(b, l, 3, self.n_heads, self.head_dim)
+
+        attn = flash_attn_qkvpacked_func(
+            qkv.type(torch.float16), 
+            softmax_scale=self.head_dim**-0.5
+            ).type_as(qkv)
+        
+        attn = attn.view(b, l, self.n_heads * self.head_dim)
+
+        return self.w_o(attn)
+
+class GeGLU(nn.Module):
+    """
+    GeGLU Activation (see: https://doi.org/10.48550/arXiv.2002.05202)
+
+    $$\text{GeGLU}(x) = (xW + b) * \text{GELU}(xV + c)$$
+    """
+    def __init__(self, in_dim: int, out_dim: int):
+        """
+        :param in_dim: The input dimensionality of the activation.
+        :param out_dim: The output dimensionality of the activation.
+        """
+        super().__init__()
+        # Combined linear projections $xW + b$ and $xV + c$
+        self.linear = nn.Linear(in_dim, out_dim * 2)
+
+    def forward(self, x: torch.Tensor):
+        # Get $xW + b$ and $xV + c$
+        xWb, xVc = self.linear(x).chunk(2, dim=-1)
+        # $\text{GeGLU}(x) = (xW + b) * \text{GELU}(xV + c)$
+        return xWb * F.gelu(xVc)
+    
+
+class FFNGeGLU(nn.Module):
+    """
+    GeGLU Feed-Forward Network (see: https://doi.org/10.48550/arXiv.2002.05202)
+    """
+    def __init__(self, model_dim: int, multiplier: int = 4, dp_rate: float = 0.0):
+        """
+        :param model_dim: The input embedding dimensionality
+        :param multiplier: The multiplicative factor for the hidden layer size
+        :param dp_rate: The dropout rate
+        """
+        super().__init__()
+        self.ffn_geglu = nn.Sequential(
+            GeGLU(model_dim, model_dim * multiplier),
+            nn.Dropout(dp_rate),
+            nn.Linear(model_dim * multiplier, model_dim)
+        )
+    def forward(self, x: torch.Tensor):
+        return self.ffn_geglu(x)
+
+
+class TransformerBlock(nn.Module):
+    """
+    A single transformer block that consists of two cross-attention layers and
+    a feed-forward network.
+
+    The first cross-attention layer is self-attention, and the second layer is
+    attention over the conditioning input. The feed-forward network is a
+    GeGLU-activated network with a single hidden layer.
+    """
+    def __init__(self, 
+                 model_dim: int, 
+                 cond_dim: int, 
+                 head_dim: int, 
+                 n_heads: int, 
+                 dp_rate: float = 0.0):
+        """ 
+        :param model_dim: The input embedding dimensionality
+        :param cond_dim: The conditioning input dimensionality
+        :param head_dim: The attention head dimensionality
+        :param n_heads: The number of attention heads
+        :param dp_rate: The dropout rate  
+        """
+        super().__init__()
+        
+        # Self-attention layer
+        self.attn_1 = CrossAttnBlock(model_dim, model_dim, head_dim, n_heads)
+        self.norm_1 = nn.LayerNorm(model_dim)
+
+        # Cross-attention layer over the conditioning input
+        self.attn_2 = CrossAttnBlock(model_dim, cond_dim, head_dim, n_heads)
+        self.norm_2 = nn.LayerNorm(model_dim)
+
+        # Feed-forward network
+        self.ffn = FFNGeGLU(model_dim, dp_rate=dp_rate)
+        self.norm_3 = nn.LayerNorm(model_dim)
+
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor):
+
+        x = self.attn_1(self.norm_1(x)) + x
+        x = self.attn_2(self.norm_2(x), cond) + x
+        x = self.ffn(self.norm_3(x)) + x
+
+        return x
