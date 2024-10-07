@@ -109,6 +109,54 @@ class ResBlock(nn.Module):
         return h + self.skip_connection(x)
 
 
+class CondResBlock(nn.Module):
+    """
+    Conditional Residual block.
+    """
+    def __init__(self, t_dim: int, in_channels: int, out_channels: int = None, dp_rate: float = 0.1):
+        """
+        :param t_dim: The dimensionality the conditional input.
+        :param in_channels: The number of channels in the input tensor.
+        :param out_channels: The number of channels in the output tensor.
+            If None, the number of channels is the same as the input tensor.
+        :param dp_rate: The dropout rate.
+        """
+        super().__init__()
+
+        if out_channels is None:
+            out_channels = in_channels
+
+        self.in_layer = nn.Sequential(
+            norm(in_channels),
+            nn.SiLU(),
+            nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1),
+        )
+
+        self.cond_emb = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(t_dim, out_channels),
+        )
+
+        self.out_layer  = nn.Sequential(
+            norm(out_channels),
+            nn.SiLU(),
+            nn.Dropout(dp_rate),
+            nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1),
+        )
+        if in_channels == out_channels:
+            self.skip_connection = nn.Identity()
+        else:
+            self.skip_connection = nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor):
+        
+        h = self.in_layer(x)
+        h = h + self.cond_emb(t)[:, :, None, None]
+        h = self.out_layer(h)
+        
+        return h + self.skip_connection(x)
+
+
 class AttnBlock(nn.Module):
     """
     Attention block with self-attention mechanism.
@@ -184,27 +232,43 @@ class CrossAttnBlock(nn.Module):
         self.w_o = nn.Linear(head_dim * n_heads, model_dim, bias=False)
 
     def forward(self, x: torch.Tensor, cond: Optional[torch.Tensor] = None):
-
+        
         if cond is None:
             cond = x
-
         q = self.w_q(x)
         k = self.w_k(cond)
         v = self.w_v(cond)
 
-        return self.attention(q, k, v)
-    def attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        if cond is None:
+            attn = self.flash_attention(q, k, v)
+        else:
+            attn = self.normal_attention(q, k, v)
 
+        return attn
+    
+    def flash_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        
         b, l, _ = q.shape
         qkv = torch.stack((q, k, v), dim=2)
         qkv = qkv.view(b, l, 3, self.n_heads, self.head_dim)
-
         attn = flash_attn_qkvpacked_func(
             qkv.type(torch.float16), 
             softmax_scale=self.head_dim**-0.5
             ).type_as(qkv)
-        
         attn = attn.view(b, l, self.n_heads * self.head_dim)
+        
+        return self.w_o(attn)
+    
+    def normal_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        
+        q = q.view(*q.shape[:2], self.n_heads, self.head_dim)
+        k = k.view(*k.shape[:2], self.n_heads, self.head_dim)
+        v = v.view(*v.shape[:2], self.n_heads, self.head_dim)
+
+        attn = torch.einsum('bihd,bjhd->bhij', q, k) * self.head_dim**-0.5
+        attn = attn.softmax(dim=-1)
+        attn = torch.einsum('bhij,bjhd->bihd', attn, v)
+        attn = attn.reshape(*attn.shape[:2], -1)
 
         return self.w_o(attn)
 
@@ -286,11 +350,10 @@ class TransformerBlock(nn.Module):
         self.ffn = FFNGeGLU(model_dim, dp_rate=dp_rate)
         self.norm_3 = nn.LayerNorm(model_dim)
 
-
     def forward(self, x: torch.Tensor, cond: torch.Tensor):
-
+        
         x = self.attn_1(self.norm_1(x)) + x
         x = self.attn_2(self.norm_2(x), cond) + x
         x = self.ffn(self.norm_3(x)) + x
-
+        
         return x
