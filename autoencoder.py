@@ -74,7 +74,7 @@ class Encoder(nn.Module):
                  x_channels: int, 
                  h_channels: int, 
                  z_channels: int, 
-                 n_resnet: int, 
+                 n_resnets: int, 
                  ch_multipliers: List[int]):
         """
         :param x_channels: The number of channels in the input data.
@@ -95,7 +95,7 @@ class Encoder(nn.Module):
         self.down = nn.ModuleList()
         for i in range(len(ch_multipliers)):
             resnets = nn.ModuleList()
-            for _ in range(n_resnet):
+            for _ in range(n_resnets):
                 resnets.append(ResBlock(h_channels, channels[i + 1]))
                 h_channels = channels[i + 1]
             down = nn.Module()
@@ -138,7 +138,7 @@ class Decoder(nn.Module):
                 x_channels: int, 
                 h_channels: int, 
                 z_channels: int, 
-                n_resnet: int, 
+                n_resnets: int, 
                 ch_multipliers: List[int]):
         """
         :param x_channels: The number of channels in the input data.
@@ -165,7 +165,7 @@ class Decoder(nn.Module):
         self.up = nn.ModuleList()
         for i in reversed(range(len(ch_multipliers))):
             resnets = nn.ModuleList()
-            for _ in range(n_resnet + 1):
+            for _ in range(n_resnets + 1):
                 resnets.append(ResBlock(h_channels, channels[i]))
                 h_channels = channels[i]
             up = nn.Module()
