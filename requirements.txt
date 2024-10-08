@@ -1,5 +1,9 @@
+datasets==3.0.1
 flash-attn==2.6.3  # https://github.com/HazyResearch/flash-attention
+matplotlib==3.9.2
 ninja==1.11.1.1
 numpy==2.1.1
 torch==2.4.1
+torchinfo==1.8.0
+torchvision==0.19.1
 transformers==4.45.1
