@@ -4,7 +4,7 @@ from torch import nn
 from typing import List
 
 from unet import UNet
-from autoencoder import AutoEncoder, Decoder, Encoder
+from autoencoder import AutoEncoder
 from conditioning import CLIPTextEmbedder
 
 
@@ -23,6 +23,7 @@ class Text2ImgLDModel(nn.Module):
         self.unet = unet
         self.autoencoder = autoencoder
         self.text_embedder = text_embedder
+        self.latent_scaling = latent_scaling
 
     def text_conditioning(self, prompts: List[str]):
         return self.text_embedder(prompts)
