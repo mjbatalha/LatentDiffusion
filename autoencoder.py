@@ -1,37 +1,36 @@
 import torch
 
+from diffusers.models import AutoencoderKL
 from torch import nn
-from torch.nn import functional as F
 from typing import List
 
 from modules import ResBlock, AttnBlock, UpSample, DownSample, norm
 
 
-class GaussianDistribution:
+class KLAutoencoder(nn.Module):
     """
-    Represents a multivariate normal distribution with diagonal covariance matrix.
-    """
-    def __init__(self, parameters: torch.Tensor):
-        """
-        :param parameters: A tensor of shape (batch_size, 2 * z_channels, h, w) containing the mean and
-            log-variance of the distribution.
-        """
-        self.mean, logvar = parameters.chunk(2, dim=1)
-        self.logvar = torch.clamp(logvar, -30, 20)
-        self.std = torch.exp(0.5 * self.logvar)
+    The KL Autoencoder class.
 
-    def sample(self):
-        return self.mean + torch.randn_like(self.mean) * self.std
+    This class is a wrapper for the `AutoencoderKL` class from the `diffusers` library.
+    It provides a simpler interface for encoding and decoding images.
+    """
+    def __init__(self, version: str = "stabilityai/sd-vae-ft-mse", device: str = "cuda:0"):
+        """
+        :param version: The model version to use. Defaults to "stabilityai/sd-vae-ft-mse".
+        :param device: The device to use for the model. Defaults to "cuda:0".
+        """
+        super().__init__()
+        self.vae = AutoencoderKL.from_pretrained(version).to(device).eval()
+    def encode(self, x):
+        return self.vae.encode(x)["latent_dist"].sample()
+    
+    def decode(self, z):
+        return self.vae.decode(z)["sample"]
     
 
-class AutoEncoder(nn.Module):
+class QVAutoencoder(nn.Module):
     """
-    The AutoEncoder class combines an encoder and a decoder with a moment-estimating
-    convolutional layer and a decoding convolutional layer.
-
-    The moment-estimating convolutional layer takes the output of the encoder and
-    produces the moments of the latent distribution. The decoding convolutional layer
-    de-quantizes the latent variable and produces the input to the decoder.
+    Here just for decoration ...
     """
     def __init__(self, encoder: "Encoder", decoder: "Decoder", z_channels: int, q_channels: int):
         """
@@ -48,7 +47,7 @@ class AutoEncoder(nn.Module):
         self.moment_conv = nn.Conv2d(2*z_channels, 2*q_channels, 1, stride=1, padding=0)
         self.decode_conv = nn.Conv2d(q_channels, z_channels, 1, stride=1, padding=0)
 
-    def encode(self, x: torch.Tensor) -> GaussianDistribution:
+    def encode(self, x: torch.Tensor) -> "GaussianDistribution":
         z = self.encoder(x)
         moments = self.moment_conv(z)
         return GaussianDistribution(moments)
@@ -57,6 +56,23 @@ class AutoEncoder(nn.Module):
         z = self.decode_conv(z)
         x = self.decoder(z)
         return x
+    
+
+class GaussianDistribution:
+    """
+    Represents a multivariate normal distribution with diagonal covariance matrix.
+    """
+    def __init__(self, parameters: torch.Tensor):
+        """
+        :param parameters: A tensor of shape (batch_size, 2 * z_channels, h, w) containing the mean and
+            log-variance of the distribution.
+        """
+        self.mean, logvar = parameters.chunk(2, dim=1)
+        self.logvar = torch.clamp(logvar, -30, 20)
+        self.std = torch.exp(0.5 * self.logvar)
+
+    def sample(self):
+        return self.mean + torch.randn_like(self.mean) * self.std
     
 
 class Encoder(nn.Module):
