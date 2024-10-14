@@ -25,14 +25,17 @@ class Text2ImgLDModel(nn.Module):
         self.unet = unet
         self.autoencoder = autoencoder
         self.text_embedder = text_embedder
+        self.n_steps = n_steps
 
-        betas = torch.linspace(beta_min, beta_max, n_steps, dtype=torch.float32)
+        betas = torch.linspace(beta_min**0.5, beta_max**0.5, n_steps, dtype=torch.float32)**2
         alphas = 1.0 - betas
         alphas = torch.cumsum(alphas.log(), dim=0).exp()
 
         self.betas = nn.Parameter(betas, requires_grad=False)
         self.alphas = nn.Parameter(alphas, requires_grad=False)
-        self.n_steps = n_steps
+        
+        for params in self.autoencoder.parameters():
+            params.requires_grad = False
 
         for params in self.text_embedder.parameters():
             params.requires_grad = False
@@ -51,19 +54,17 @@ class Text2ImgLDModel(nn.Module):
     
     def add_noise(self, z: torch.Tensor, t: torch.Tensor):
         alphas_t = self.alphas[t][:, None, None, None]
-        return z * torch.sqrt(alphas_t) + torch.sqrt(1.0 - alphas_t) * torch.randn_like(z)
+        noise = torch.randn_like(z)
+        z = z * torch.sqrt(alphas_t) + torch.sqrt(1.0 - alphas_t) * noise
+        return z, noise
 
     @torch.inference_mode()
     def sample(self, z: torch.Tensor, t: torch.Tensor, c: torch.Tensor):
-        
-        idx_t = t[0]  # same idx_t across batch
-
-        beta_t = self.betas[idx_t]
-        inv_sqrt_alpha_t = 1.0 / (torch.sqrt(1.0 - beta_t))
-        inv_sqrt_1m_alpha_bar_t = 1.0 / (torch.sqrt(1.0 - self.alphas[idx_t]))
-
-        mean = inv_sqrt_alpha_t * (z - beta_t * inv_sqrt_1m_alpha_bar_t * self.unet(z, t, c))
-        noise = torch.randn_like(z) * torch.sqrt(beta_t) if idx_t != 0 else 0
-
+        betas_t = self.betas[t][:, None, None, None]
+        alphas_t = self.alphas[t][:, None, None, None]
+        inv_sqrt_alpha_t = 1.0 / (torch.sqrt(1.0 - betas_t))
+        inv_sqrt_1m_alpha_bar_t = 1.0 / (torch.sqrt(1.0 - alphas_t))
+        mean = inv_sqrt_alpha_t * (z - betas_t * inv_sqrt_1m_alpha_bar_t * self.unet(z, t, c))
+        noise = torch.randn_like(z) * torch.sqrt(betas_t)
         return mean + noise
 
