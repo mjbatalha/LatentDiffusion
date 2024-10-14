@@ -19,12 +19,19 @@ class DiffusionDB(object):
     see: https://poloclub.github.io/diffusiondb/
     
     """
-    def __init__(self, config: dict, name: str = "poloclub/diffusiondb", size: str = "large_first_1k"): 
+    def __init__(
+            self, 
+            dataloader: dict, 
+            transforms: dict,
+            name: str = "poloclub/diffusiondb", 
+            size: str = "large_first_1k"
+            ):
+        
         super(DiffusionDB, self).__init__()
 
-        self.config = config.copy()
-        self.ds = load_dataset(name, size, split="train")        
-        self.transforms = Compose([TRANSFORMS[k](**v) for k, v in self.config["transforms"].items()])
+        self.dl_config = dataloader       
+        self.transforms = Compose([TRANSFORMS[k](**v) for k, v in transforms.items()])
+        self.ds = load_dataset(name, size, split="train") 
 
     def apply_transforms(self, batch_size: int = 100, n_threads: int = 10):
         self.ds = self.ds.map(
@@ -42,5 +49,5 @@ class DiffusionDB(object):
         return batch
     
     def get_dataloader(self):
-        return DataLoader(self.ds, **self.config["dataloader"])
+        return DataLoader(self.ds, **self.dl_config)
     
