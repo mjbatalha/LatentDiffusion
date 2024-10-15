@@ -1,0 +1,97 @@
+dataset:
+  dataloader:
+    batch_size: 64
+    num_workers: 0
+    shuffle: true
+  name: poloclub/diffusiondb
+  size: large_first_1k
+  transforms:
+    resize:
+      size:
+      - 256
+      - 256
+    totensor: {}
+
+train:
+  writter:
+    log_dir: runs/test
+    comment: test
+  n_epochs: 10
+  sample_prompts:
+  - dog
+  - dog
+  - dog
+  - dog
+  - day and night
+  - day and night
+  - day and night
+  - day and night
+  - superman
+  - superman
+  - superman
+  - superman
+  - human face
+  - human face
+  - human face
+  - human face
+  - giant white daisy flower, girl walking in dark forest, surreal photography, dark
+    night, stars, moon light, impressionist painting
+  - giant white daisy flower, girl walking in dark forest, surreal photography, dark
+    night, stars, moon light, impressionist painting
+  - giant white daisy flower, girl walking in dark forest, surreal photography, dark
+    night, stars, moon light, impressionist painting
+  - giant white daisy flower, girl walking in dark forest, surreal photography, dark
+    night, stars, moon light, impressionist painting
+  - a fantasy black bridge across a big lake, aerial view, matte painting by raphael
+    lacoste trending on artstation
+  - a fantasy black bridge across a big lake, aerial view, matte painting by raphael
+    lacoste trending on artstation
+  - a fantasy black bridge across a big lake, aerial view, matte painting by raphael
+    lacoste trending on artstation
+  - a fantasy black bridge across a big lake, aerial view, matte painting by raphael
+    lacoste trending on artstation
+  - 'album cover of firework mist by akihiko yoshida '
+  - 'album cover of firework mist by akihiko yoshida '
+  - 'album cover of firework mist by akihiko yoshida '
+  - 'album cover of firework mist by akihiko yoshida '
+  - neon wireframe raven in an acid graphix style. adobe
+  - neon wireframe raven in an acid graphix style. adobe
+  - neon wireframe raven in an acid graphix style. adobe
+  - neon wireframe raven in an acid graphix style. adobe
+  loss:
+    mse: {}
+  optimizer:
+    adam:
+      lr: 0.0001
+  seed: 42
+  z_shape:
+  - 4
+  - 32
+  - 32
+  device: cuda
+
+ld_model:
+  beta_max: 0.02
+  beta_min: 0.0001
+  n_steps: 1000
+
+unet:
+  attn_levels:
+  - 1
+  - 2
+  - 3
+  - 4
+  c_dim: 768
+  ch_multipliers:
+  - 2
+  - 4
+  - 4
+  - 8
+  - 16
+  h_channels: 32
+  in_channels: 4
+  n_heads: 8
+  n_resnets: 1
+  n_transformers: 1
+  out_channels: 4
+
